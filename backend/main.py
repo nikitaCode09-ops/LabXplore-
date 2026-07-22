@@ -23,8 +23,7 @@ if not api_key:
 
 # Standard Gemini API configuration
 genai.configure(api_key=api_key)
-gemini_model = genai.GenerativeModel('gemini-1.5-flash')
-
+gemini_model = genai.GenerativeModel('gemini-1.5-flash-latest')
 # ==========================================
 # 2. DATABASE INITIALIZATION FUNCTION
 # ==========================================
