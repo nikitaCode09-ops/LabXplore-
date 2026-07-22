@@ -362,7 +362,7 @@ export default function App() {
   useEffect(() => {
     const fetchAllSessions = async () => {
       try {
-        const res = await fetch("http://localhost:8000/sessions");
+        const res = await fetch("https://labxplore.onrender.com/sessions");
         const data = await res.json();
         const newFreshId = "session_" + Date.now();
         const newBlankSession = { id: newFreshId, messages: [] };
@@ -392,7 +392,7 @@ export default function App() {
   useEffect(() => {
     const fetchHistory = async () => {
       try {
-        const res = await fetch(`http://localhost:8000/history/${activeChatId}`);
+        const res = await fetch(`https://labxplore.onrender.com/history/${activeChatId}`);
         const data = await res.json();
         if (data.history && data.history.length > 0) {
           const formattedHistory = data.history.map((msg, idx) => ({
@@ -575,7 +575,7 @@ export default function App() {
       formData.append("file", new File([blob], "camera_snapshot.jpg", { type: "image/jpeg" }));
 
       try {
-        const response = await fetch(`http://localhost:8000/upload?session_id=${activeChatId}&language=${selectedLanguage}`, {
+        const response = await fetch(`https://labxplore.onrender.com/upload?session_id=${activeChatId}&language=${selectedLanguage}`, {
           method: "POST",
           body: formData,
         });
@@ -672,7 +672,7 @@ export default function App() {
 
     const endpoint = authMode === 'login' ? '/login' : '/register';
     try {
-      const response = await fetch(`http://localhost:8000${endpoint}`, {
+      const response = await fetch(`https://labxplore.onrender.com${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(authFormData)
@@ -735,7 +735,7 @@ export default function App() {
     setIsTyping(true);
 
     try {
-      const response = await fetch("http://localhost:8000/chat", {
+      const response = await fetch("https://labxplore.onrender.com/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -776,7 +776,7 @@ export default function App() {
     formData.append("file", file);
 
     try {
-      const response = await fetch(`http://localhost:8000/upload?session_id=${activeChatId}&language=${selectedLanguage}`, {
+      const response = await fetch(`https://labxplore.onrender.com/upload?session_id=${activeChatId}&language=${selectedLanguage}`, {
         method: "POST",
         body: formData,
       });
