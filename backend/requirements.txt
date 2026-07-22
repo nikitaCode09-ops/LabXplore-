@@ -1,7 +1,6 @@
 fastapi
 uvicorn
+google-generativeai
 python-dotenv
-google-genai
-pydantic
 bcrypt
 python-multipart
