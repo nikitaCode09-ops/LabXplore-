@@ -5,11 +5,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
 import google.generativeai as genai
-import shutil
 from typing import List
 from dotenv import load_dotenv
 import bcrypt
-import json
 
 load_dotenv()
 
@@ -19,11 +17,14 @@ load_dotenv()
 api_key = os.getenv("GEMINI_API_KEY")
 
 if not api_key:
-    raise RuntimeError("🚨 SECURITY ERROR: GEMINI_API_KEY is not set in the environment variables!")
+    raise RuntimeError("SECURITY ERROR: GEMINI_API_KEY is not set in the environment variables!")
 
 # Standard Gemini API configuration
 genai.configure(api_key=api_key)
-gemini_model = genai.GenerativeModel('gemini-1.5-flash-latest')
+
+# Using gemini-2.0-flash for high performance and stability across vision/text tasks
+gemini_model = genai.GenerativeModel('gemini-2.0-flash')
+
 # ==========================================
 # 2. DATABASE INITIALIZATION FUNCTION
 # ==========================================
@@ -74,10 +75,9 @@ def init_db():
 # ==========================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()  # Server on hote hi database banega/load hoga
+    init_db()  # Runs automatically when the server turns on
     yield
 
-# App initialization
 app = FastAPI(lifespan=lifespan)
 
 # CORS Middleware setup
@@ -89,7 +89,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🌟 Structured Response Models
+# Structured Response & Request Models
 class HighlightItem(BaseModel):
     type: str  # 'critical', 'warning', 'normal', 'info'
     title: str
@@ -101,7 +101,7 @@ class StructuredReportResponse(BaseModel):
 
 class ChatRequest(BaseModel):
     session_id: str = "default_session"
-    history: list
+    history: list = []
     message: str
     language: str = "English"
 
@@ -117,6 +117,10 @@ class UserLoginRequest(BaseModel):
 # ==========================================
 # 4. API ROUTES & LOGIC
 # ==========================================
+
+@app.get("/")
+async def root():
+    return {"message": "LabXplore API is active and running!"}
 
 @app.post("/register")
 async def register_user(data: UserRegisterRequest):
@@ -139,8 +143,11 @@ async def register_user(data: UserRegisterRequest):
         conn.commit()
         conn.close()
         return {"status": "success", "message": f"User {data.username} securely registered as {data.role}!"}
+    
+    except HTTPException as http_ex:
+        raise http_ex
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/login")
 async def login_user(data: UserLoginRequest):
@@ -168,8 +175,11 @@ async def login_user(data: UserLoginRequest):
             "username": data.username,
             "role": db_role
         }
+    
+    except HTTPException as http_ex:
+        raise http_ex
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/chat")
 async def chat(data: ChatRequest):
@@ -185,16 +195,16 @@ async def chat(data: ChatRequest):
                        (data.session_id, "user", data.message))
         conn.commit()
 
-        # Medical System Instruction Prompt
+        # Medical System Guardrail Prompt
         system_instruction = """
         You are LabXplore Neural AI, a strict medical and pathology laboratory assistant.
         CRITICAL GUARDRAIL RULES:
         1. You are ONLY allowed to answer questions related to medicine, human health, healthcare, biological biomarkers, biology, symptoms, and medical laboratory reports.
         2. If the user asks about ANY non-medical topic, you must strictly and politely refuse.
-        3. Your refusal response MUST be exactly: "🚨 **Scope Restriction:** I am engineered exclusively for clinical pathology and medical data analysis. I cannot assist with non-medical inquiries."
+        3. Your refusal response MUST be exactly: "Scope Restriction: I am engineered exclusively for clinical pathology and medical data analysis. I cannot assist with non-medical inquiries."
         """
 
-        language_instruction = f"\n\nCRITICAL: Respond strictly in {data.language} language. If Hinglish, use Latin script but speak in Hindi style. TREND TRACKING: If the user mentions health metrics/biomarkers that were mentioned earlier in chat history, include a small '📈 Trend Update' bullet point comparing the old value with the new value."
+        language_instruction = f"\n\nCRITICAL: Respond strictly in {data.language} language. If Hinglish, use Latin script but speak in Hindi style. TREND TRACKING: If the user mentions health metrics/biomarkers that were mentioned earlier in chat history, include a small 'Trend Update' bullet point comparing the old value with the new value."
 
         prompt_with_context = f"{system_instruction}\n\nUser Question: {data.message}{language_instruction}"
 
@@ -208,8 +218,11 @@ async def chat(data: ChatRequest):
         conn.close()
 
         return {"response": ai_text}
+    
+    except HTTPException as http_ex:
+        raise http_ex
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/history/{session_id}")
 async def get_history(session_id: str):
@@ -223,17 +236,18 @@ async def get_history(session_id: str):
 
         history = [{"sender": msg[0], "text": msg[1]} for msg in messages]
         return {"history": history}
+    
     except Exception as e:
-        return {"error": str(e)}
-        
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/upload")
 async def upload_report(session_id: str, language: str = "English", file: UploadFile = File(...)):
     try:
-        MAX_FILE_SIZE = 10 * 1024 * 1024  
+        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB Limit
         file_bytes = await file.read()
 
         if len(file_bytes) > MAX_FILE_SIZE:
-            raise HTTPException(status_code=400, detail="🚨 Security Alert: File size exceeds the 10MB limit.")
+            raise HTTPException(status_code=400, detail="Security Alert: File size exceeds the 10MB limit.")
 
         os.makedirs("temp_uploads", exist_ok=True)
         file_location = f"temp_uploads/{file.filename}"
@@ -262,17 +276,23 @@ async def upload_report(session_id: str, language: str = "English", file: Upload
         Analyze this uploaded laboratory report carefully. 
         Extract key biomarkers, values, reference ranges, and explain what they mean.
         
-        📈 BIOMARKER TREND TRACKER RULE:
+        BIOMARKER TREND TRACKER RULE:
         Past context: '{past_context_string}'.
-        Compare new values with past values. Add a section named "📈 BIOMARKER TREND TRACKER".
+        Compare new values with past values. Add a section named "BIOMARKER TREND TRACKER".
         State if biomarkers are going UP, DOWN, or STABLE.
         If no past data, write: "Trend tracking will activate on your next report upload!"
         
         Provide analysis in {language} language. Keep it friendly and comforting.
         """
 
-        # Gemini Image / File Processing Call
-        image_part = {"mime_type": file.content_type, "data": file_bytes}
+        # Gemini SDK Standard Inline Data Payload
+        image_part = {
+            "inline_data": {
+                "mime_type": file.content_type,
+                "data": file_bytes
+            }
+        }
+        
         response = gemini_model.generate_content([prompt, image_part])
         ai_text = response.text
 
@@ -281,6 +301,7 @@ async def upload_report(session_id: str, language: str = "English", file: Upload
         conn.commit()
         conn.close()
 
+        # Clean up local temporary file buffer
         if os.path.exists(file_location):
             os.remove(file_location)
 
@@ -291,8 +312,10 @@ async def upload_report(session_id: str, language: str = "English", file: Upload
             "title": file_title
         }
 
+    except HTTPException as http_ex:
+        raise http_ex
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/sessions")
 async def get_all_sessions():
@@ -310,5 +333,6 @@ async def get_all_sessions():
             
         conn.close()
         return {"sessions": sessions_list}
+    
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
