@@ -712,51 +712,84 @@ export default function App() {
     }
   };
   const handleSendMessage = async (e) => {
-    e?.preventDefault();
-    if (!inputText.trim()) return;
+  e?.preventDefault();
 
-    const userMessage = inputText;
-    const lowerMessage = userMessage.toLowerCase();
-    const casualKeywords = ['recipe', 'cooking', 'movie', 'song', 'cricket', 'game', 'joke', 'dance', 'code in python', 'write an essay'];
-    const isCasual = casualKeywords.some(keyword => lowerMessage.includes(keyword));
+  if (!inputText.trim()) return;
 
-    if (isCasual) {
-      setMessages(prev => [...prev,
-      { id: Date.now(), sender: 'user', text: userMessage },
-      { id: Date.now() + 1, sender: 'ai', text: "🚨 **Scope Restriction:** I am engineered exclusively for clinical pathology and medical data analysis. Please inquire about diagnostic metrics or health-related parameters." }
-      ]);
-      setInputText('');
-      return;
-    }
+  const userMessage = inputText.trim();
 
-    const newMsg = { id: Date.now(), sender: 'user', text: userMessage };
-    setMessages(prev => [...prev, newMsg]);
-    setInputText('');
-    setIsTyping(true);
+  const newMsg = {
+    id: Date.now(),
+    sender: 'user',
+    text: userMessage
+  };
 
-    try {
-      const response = await fetch("https://labxplore.onrender.com/chat", {
+  setMessages(prev => [...prev, newMsg]);
+  setInputText('');
+  setIsTyping(true);
+
+  try {
+    const response = await fetch(
+      "https://labxplore.onrender.com/chat",
+      {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json"
+        },
         body: JSON.stringify({
           session_id: activeChatId.toString(),
-          history: [...messages, newMsg].map(m => ({ sender: m.sender === 'ai' ? 'model' : 'user', text: m.text })),
+          history: [...messages, newMsg].map(m => ({
+            sender: m.sender === 'ai' ? 'model' : 'user',
+            text: m.text
+          })),
           message: userMessage,
-          language: selectedLanguage,
-        }),
-      });
-      const data = await response.json();
-      setMessages(prev => [...prev, {
+          language: selectedLanguage
+        })
+      }
+    );
+
+    const data = await response.json();
+
+    console.log("CHAT STATUS:", response.status);
+    console.log("CHAT RESPONSE:", data);
+
+    if (!response.ok) {
+      throw new Error(
+        data.detail ||
+        data.error ||
+        `Server error: ${response.status}`
+      );
+    }
+
+    if (!data.response) {
+      throw new Error("Gemini did not return a response.");
+    }
+
+    setMessages(prev => [
+      ...prev,
+      {
         id: Date.now() + 1,
         sender: 'ai',
-        text: data.highlights && data.highlights.length > 0 ? JSON.stringify({ highlights: data.highlights, full_analysis: data.response }) : data.response,
-      }]);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsTyping(false);
-    }
-  };
+        text: data.response
+      }
+    ]);
+
+  } catch (error) {
+    console.error("CHAT ERROR:", error);
+
+    setMessages(prev => [
+      ...prev,
+      {
+        id: Date.now() + 1,
+        sender: 'ai',
+        text: `⚠️ AI Error: ${error.message}`
+      }
+    ]);
+
+  } finally {
+    setIsTyping(false);
+  }
+};
 
   const handleClearChat = () => {
     setMessages([{

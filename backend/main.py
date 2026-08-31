@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
-import google.generativeai as genai
+from google import genai
 from typing import List
 from dotenv import load_dotenv
 import bcrypt
@@ -14,24 +14,25 @@ load_dotenv()
 # ==========================================
 # 1. API KEY SETUP & GEMINI INIT
 # ==========================================
+
 api_key = os.getenv("GEMINI_API_KEY")
 
 if not api_key:
-    raise RuntimeError("SECURITY ERROR: GEMINI_API_KEY is not set in the environment variables!")
+    raise RuntimeError(
+        "SECURITY ERROR: GEMINI_API_KEY is not set in the environment variables!"
+    )
 
-# Standard Gemini API configuration
-genai.configure(api_key=api_key)
-
-# Using gemini-2.0-flash for high performance and stability across vision/text tasks
-gemini_model = genai.GenerativeModel('gemini-2.0-flash')
+# New Gemini SDK
+client = genai.Client(api_key=api_key)
 
 # ==========================================
 # 2. DATABASE INITIALIZATION FUNCTION
 # ==========================================
+
 def init_db():
     conn = sqlite3.connect("labxplore.db")
     cursor = conn.cursor()
-    
+
     # Users Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
@@ -42,7 +43,7 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
+
     # Chat Sessions Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS chat_sessions (
@@ -53,7 +54,7 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
     ''')
-    
+
     # Messages Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS messages (
@@ -66,38 +67,51 @@ def init_db():
             FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
         )
     ''')
-    
+
     conn.commit()
     conn.close()
+
 
 # ==========================================
 # 3. FASTAPI LIFESPAN & APP INIT
 # ==========================================
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()  # Runs automatically when the server turns on
+    init_db()
     yield
+
 
 app = FastAPI(lifespan=lifespan)
 
-# CORS Middleware setup
+
+# ==========================================
+# CORS Middleware
+# ==========================================
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Structured Response & Request Models
+
+# ==========================================
+# 4. REQUEST / RESPONSE MODELS
+# ==========================================
+
 class HighlightItem(BaseModel):
-    type: str  # 'critical', 'warning', 'normal', 'info'
+    type: str
     title: str
     description: str
+
 
 class StructuredReportResponse(BaseModel):
     highlights: List[HighlightItem]
     full_analysis: str
+
 
 class ChatRequest(BaseModel):
     session_id: str = "default_session"
@@ -105,22 +119,32 @@ class ChatRequest(BaseModel):
     message: str
     language: str = "English"
 
+
 class UserRegisterRequest(BaseModel):
     username: str
     password: str
     role: str = "patient"
 
+
 class UserLoginRequest(BaseModel):
     username: str
     password: str
 
+
 # ==========================================
-# 4. API ROUTES & LOGIC
+# 5. ROOT API
 # ==========================================
 
 @app.get("/")
 async def root():
-    return {"message": "LabXplore API is active and running!"}
+    return {
+        "message": "LabXplore API is active and running!"
+    }
+
+
+# ==========================================
+# 6. REGISTER
+# ==========================================
 
 @app.post("/register")
 async def register_user(data: UserRegisterRequest):
@@ -128,26 +152,55 @@ async def register_user(data: UserRegisterRequest):
         conn = sqlite3.connect("labxplore.db")
         cursor = conn.cursor()
 
-        cursor.execute("SELECT id FROM users WHERE username = ?", (data.username,))
+        cursor.execute(
+            "SELECT id FROM users WHERE username = ?",
+            (data.username,)
+        )
+
         if cursor.fetchone():
             conn.close()
-            raise HTTPException(status_code=400, detail="Username already exists!")
+            raise HTTPException(
+                status_code=400,
+                detail="Username already exists!"
+            )
 
-        password_bytes = data.password.encode('utf-8')
-        hashed_pwd = bcrypt.hashpw(password_bytes, bcrypt.gensalt()).decode('utf-8')
+        password_bytes = data.password.encode("utf-8")
+
+        hashed_pwd = bcrypt.hashpw(
+            password_bytes,
+            bcrypt.gensalt()
+        ).decode("utf-8")
 
         cursor.execute(
             "INSERT INTO users (username, password, role) VALUES (?, ?, ?)",
-            (data.username, hashed_pwd, data.role)
+            (
+                data.username,
+                hashed_pwd,
+                data.role
+            )
         )
+
         conn.commit()
         conn.close()
-        return {"status": "success", "message": f"User {data.username} securely registered as {data.role}!"}
-    
+
+        return {
+            "status": "success",
+            "message": f"User {data.username} securely registered as {data.role}!"
+        }
+
     except HTTPException as http_ex:
         raise http_ex
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+
+# ==========================================
+# 7. LOGIN
+# ==========================================
 
 @app.post("/login")
 async def login_user(data: UserLoginRequest):
@@ -155,184 +208,622 @@ async def login_user(data: UserLoginRequest):
         conn = sqlite3.connect("labxplore.db")
         cursor = conn.cursor()
 
-        cursor.execute("SELECT password, role FROM users WHERE username = ?", (data.username,))
+        cursor.execute(
+            "SELECT password, role FROM users WHERE username = ?",
+            (data.username,)
+        )
+
         user_record = cursor.fetchone()
         conn.close()
 
         if not user_record:
-            raise HTTPException(status_code=400, detail="Invalid username or password!")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid username or password!"
+            )
 
         db_hashed_password, db_role = user_record
 
-        user_pwd_bytes = data.password.encode('utf-8')
-        db_pwd_bytes = db_hashed_password.encode('utf-8')
+        user_pwd_bytes = data.password.encode("utf-8")
+        db_pwd_bytes = db_hashed_password.encode("utf-8")
 
-        if not bcrypt.checkpw(user_pwd_bytes, db_pwd_bytes):
-            raise HTTPException(status_code=400, detail="Invalid username or password!")
+        if not bcrypt.checkpw(
+            user_pwd_bytes,
+            db_pwd_bytes
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid username or password!"
+            )
 
         return {
             "status": "success",
             "username": data.username,
             "role": db_role
         }
-    
+
     except HTTPException as http_ex:
         raise http_ex
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+
+# ==========================================
+# 8. CHAT WITH GEMINI 2.5 PRO
+# ==========================================
 
 @app.post("/chat")
 async def chat(data: ChatRequest):
     try:
+
+        # --------------------------------------
+        # Database connection
+        # --------------------------------------
+
         conn = sqlite3.connect("labxplore.db")
         cursor = conn.cursor()
 
-        cursor.execute("SELECT id FROM chat_sessions WHERE id = ?", (data.session_id,))
-        if not cursor.fetchone():
-            cursor.execute("INSERT INTO chat_sessions (id, title) VALUES (?, ?)", (data.session_id, "LabXplore Analysis"))
+        cursor.execute(
+            "SELECT id FROM chat_sessions WHERE id = ?",
+            (data.session_id,)
+        )
 
-        cursor.execute("INSERT INTO messages (session_id, sender, text) VALUES (?, ?, ?)",
-                       (data.session_id, "user", data.message))
+        if not cursor.fetchone():
+            cursor.execute(
+                "INSERT INTO chat_sessions (id, title) VALUES (?, ?)",
+                (
+                    data.session_id,
+                    "LabXplore Analysis"
+                )
+            )
+
+        # Save user message
+        cursor.execute(
+            """
+            INSERT INTO messages
+            (session_id, sender, text)
+            VALUES (?, ?, ?)
+            """,
+            (
+                data.session_id,
+                "user",
+                data.message
+            )
+        )
+
         conn.commit()
 
+        # --------------------------------------
         # Medical System Guardrail Prompt
+        # --------------------------------------
+
         system_instruction = """
-        You are LabXplore Neural AI, a strict medical and pathology laboratory assistant.
-        CRITICAL GUARDRAIL RULES:
-        1. You are ONLY allowed to answer questions related to medicine, human health, healthcare, biological biomarkers, biology, symptoms, and medical laboratory reports.
-        2. If the user asks about ANY non-medical topic, you must strictly and politely refuse.
-        3. Your refusal response MUST be exactly: "Scope Restriction: I am engineered exclusively for clinical pathology and medical data analysis. I cannot assist with non-medical inquiries."
-        """
+You are LabXplore Neural AI, a strict medical and pathology laboratory assistant.
 
-        language_instruction = f"\n\nCRITICAL: Respond strictly in {data.language} language. If Hinglish, use Latin script but speak in Hindi style. TREND TRACKING: If the user mentions health metrics/biomarkers that were mentioned earlier in chat history, include a small 'Trend Update' bullet point comparing the old value with the new value."
+CRITICAL GUARDRAIL RULES:
 
-        prompt_with_context = f"{system_instruction}\n\nUser Question: {data.message}{language_instruction}"
+1. You are ONLY allowed to answer questions related to:
+   - medicine
+   - human health
+   - healthcare
+   - biological biomarkers
+   - biology
+   - symptoms
+   - medical laboratory reports
+   - pathology
+   - diagnostic laboratory data
 
-        # Safe Async Gemini Call
-        response = gemini_model.generate_content(prompt_with_context)
+2. If the user asks about ANY non-medical topic,
+   you must strictly and politely refuse.
+
+3. Your refusal response MUST be exactly:
+
+"Scope Restriction: I am engineered exclusively for clinical pathology and medical data analysis. I cannot assist with non-medical inquiries."
+
+4. Never invent laboratory values or medical facts.
+
+5. Explain laboratory results clearly and carefully.
+
+6. Do not claim to replace a qualified doctor.
+
+7. If a result appears abnormal, explain that it may require professional medical evaluation.
+"""
+
+        # --------------------------------------
+        # Language instruction
+        # --------------------------------------
+
+        language_instruction = f"""
+
+CRITICAL:
+Respond strictly in {data.language} language.
+
+If Hinglish is selected:
+Use Latin script but speak in natural Hindi style.
+
+TREND TRACKING:
+If the user mentions health metrics or biomarkers
+that were mentioned earlier in the chat history,
+include a small "Trend Update" bullet point comparing
+the old value with the new value.
+"""
+
+        # --------------------------------------
+        # Build conversation history
+        # --------------------------------------
+
+        history_text = ""
+
+        if data.history:
+
+            for item in data.history:
+
+                sender = item.get("sender", "")
+                text = item.get("text", "")
+
+                if not text:
+                    continue
+
+                if sender == "model" or sender == "ai":
+                    history_text += f"\nAI: {text}\n"
+
+                else:
+                    history_text += f"\nUser: {text}\n"
+
+        # --------------------------------------
+        # Final prompt
+        # --------------------------------------
+
+        prompt_with_context = f"""
+{system_instruction}
+
+CONVERSATION HISTORY:
+{history_text}
+
+CURRENT USER QUESTION:
+{data.message}
+
+{language_instruction}
+
+Provide a helpful medical/pathology response.
+"""
+
+        # --------------------------------------
+        # Gemini 2.5 Pro API call
+        # --------------------------------------
+
+        response = client.models.generate_content(
+            model="gemini-2.5-pro",
+            contents=prompt_with_context
+        )
+
+        # --------------------------------------
+        # Get Gemini response
+        # --------------------------------------
+
         ai_text = response.text
 
-        cursor.execute("INSERT INTO messages (session_id, sender, text) VALUES (?, ?, ?)",
-                       (data.session_id, "model", ai_text))
+        if not ai_text:
+            raise Exception(
+                "Gemini returned an empty response."
+            )
+
+        # --------------------------------------
+        # Save AI response
+        # --------------------------------------
+
+        cursor.execute(
+            """
+            INSERT INTO messages
+            (session_id, sender, text)
+            VALUES (?, ?, ?)
+            """,
+            (
+                data.session_id,
+                "model",
+                ai_text
+            )
+        )
+
         conn.commit()
         conn.close()
 
-        return {"response": ai_text}
-    
+        return {
+            "response": ai_text
+        }
+
     except HTTPException as http_ex:
         raise http_ex
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
+        print("GEMINI CHAT ERROR:", str(e))
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+
+# ==========================================
+# 9. CHAT HISTORY
+# ==========================================
 
 @app.get("/history/{session_id}")
 async def get_history(session_id: str):
+
     try:
+
         conn = sqlite3.connect("labxplore.db")
         cursor = conn.cursor()
-        
-        cursor.execute("SELECT sender, text FROM messages WHERE session_id = ? ORDER BY created_at ASC", (session_id,))
+
+        cursor.execute(
+            """
+            SELECT sender, text
+            FROM messages
+            WHERE session_id = ?
+            ORDER BY created_at ASC
+            """,
+            (session_id,)
+        )
+
         messages = cursor.fetchall()
+
         conn.close()
 
-        history = [{"sender": msg[0], "text": msg[1]} for msg in messages]
-        return {"history": history}
-    
+        history = [
+            {
+                "sender": msg[0],
+                "text": msg[1]
+            }
+            for msg in messages
+        ]
+
+        return {
+            "history": history
+        }
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+
+# ==========================================
+# 10. UPLOAD MEDICAL REPORT
+# ==========================================
 
 @app.post("/upload")
-async def upload_report(session_id: str, language: str = "English", file: UploadFile = File(...)):
+async def upload_report(
+    session_id: str,
+    language: str = "English",
+    file: UploadFile = File(...)
+):
+
+    file_location = None
+
     try:
-        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB Limit
+
+        # --------------------------------------
+        # File size limit
+        # --------------------------------------
+
+        MAX_FILE_SIZE = 10 * 1024 * 1024
+
         file_bytes = await file.read()
 
         if len(file_bytes) > MAX_FILE_SIZE:
-            raise HTTPException(status_code=400, detail="Security Alert: File size exceeds the 10MB limit.")
+            raise HTTPException(
+                status_code=400,
+                detail="Security Alert: File size exceeds the 10MB limit."
+            )
 
-        os.makedirs("temp_uploads", exist_ok=True)
-        file_location = f"temp_uploads/{file.filename}"
-        
-        with open(file_location, "wb") as buffer:
+        # --------------------------------------
+        # Temporary upload folder
+        # --------------------------------------
+
+        os.makedirs(
+            "temp_uploads",
+            exist_ok=True
+        )
+
+        file_location = (
+            f"temp_uploads/{file.filename}"
+        )
+
+        with open(
+            file_location,
+            "wb"
+        ) as buffer:
+
             buffer.write(file_bytes)
-            
+
+        # --------------------------------------
+        # Database
+        # --------------------------------------
+
         conn = sqlite3.connect("labxplore.db")
         cursor = conn.cursor()
-        
-        cursor.execute("SELECT id FROM chat_sessions WHERE id = ?", (session_id,))
+
+        cursor.execute(
+            "SELECT id FROM chat_sessions WHERE id = ?",
+            (session_id,)
+        )
+
         if not cursor.fetchone():
-            file_title = f"Doc: {file.filename[:20]}"
-            cursor.execute("INSERT INTO chat_sessions (id, title) VALUES (?, ?)", (session_id, file_title))
-            
-        cursor.execute("INSERT INTO messages (session_id, sender, text, is_file) VALUES (?, ?, ?, ?)",
-                       (session_id, "user", f"Uploaded Document: {file.filename}", True))
+
+            file_title = (
+                f"Doc: {file.filename[:20]}"
+            )
+
+            cursor.execute(
+                """
+                INSERT INTO chat_sessions
+                (id, title)
+                VALUES (?, ?)
+                """,
+                (
+                    session_id,
+                    file_title
+                )
+            )
+
+        # Save uploaded document message
+        cursor.execute(
+            """
+            INSERT INTO messages
+            (session_id, sender, text, is_file)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                "user",
+                f"Uploaded Document: {file.filename}",
+                True
+            )
+        )
+
         conn.commit()
 
-        cursor.execute("SELECT text FROM messages WHERE session_id = ? AND sender = 'user'", (session_id,))
-        past_user_texts = [row[0] for row in cursor.fetchall()]
-        past_context_string = " | ".join(past_user_texts)
+        # --------------------------------------
+        # Previous user context
+        # --------------------------------------
+
+        cursor.execute(
+            """
+            SELECT text
+            FROM messages
+            WHERE session_id = ?
+            AND sender = 'user'
+            """,
+            (session_id,)
+        )
+
+        past_user_texts = [
+            row[0]
+            for row in cursor.fetchall()
+        ]
+
+        past_context_string = " | ".join(
+            past_user_texts
+        )
+
+        # --------------------------------------
+        # Medical report prompt
+        # --------------------------------------
 
         prompt = f"""
-        You are LabXplore AI, an expert medical report analyzer and Trend Tracker. 
-        Analyze this uploaded laboratory report carefully. 
-        Extract key biomarkers, values, reference ranges, and explain what they mean.
-        
-        BIOMARKER TREND TRACKER RULE:
-        Past context: '{past_context_string}'.
-        Compare new values with past values. Add a section named "BIOMARKER TREND TRACKER".
-        State if biomarkers are going UP, DOWN, or STABLE.
-        If no past data, write: "Trend tracking will activate on your next report upload!"
-        
-        Provide analysis in {language} language. Keep it friendly and comforting.
-        """
+You are LabXplore AI,
+an expert medical report analyzer and Trend Tracker.
 
-        # Gemini SDK Standard Inline Data Payload
+Analyze this uploaded laboratory report carefully.
+
+Extract:
+
+- Patient information if available
+- Test names
+- Biomarkers
+- Values
+- Reference ranges
+- Units
+- Abnormal results
+- Possible medical significance
+
+Explain what the laboratory values mean
+in simple and understandable language.
+
+BIOMARKER TREND TRACKER RULE:
+
+Past context:
+'{past_context_string}'
+
+Compare new values with previous values
+when previous values are available.
+
+Add a section named:
+
+BIOMARKER TREND TRACKER
+
+State whether biomarkers are:
+
+UP
+DOWN
+STABLE
+
+If there is no previous data, write:
+
+"Trend tracking will activate on your next report upload!"
+
+IMPORTANT:
+
+Do not invent values.
+
+If a value or reference range cannot be read,
+clearly say that it could not be determined.
+
+Provide analysis in {language} language.
+
+Keep the explanation friendly,
+clear and comforting.
+
+This is an AI-assisted interpretation
+and should not replace professional medical advice.
+"""
+
+        # --------------------------------------
+        # Gemini inline file data
+        # --------------------------------------
+
         image_part = {
             "inline_data": {
                 "mime_type": file.content_type,
                 "data": file_bytes
             }
         }
-        
-        response = gemini_model.generate_content([prompt, image_part])
+
+        # --------------------------------------
+        # Gemini 2.5 Pro Vision/File Analysis
+        # --------------------------------------
+
+        response = client.models.generate_content(
+            model="gemini-2.5-pro",
+            contents=[
+                prompt,
+                image_part
+            ]
+        )
+
         ai_text = response.text
 
-        cursor.execute("INSERT INTO messages (session_id, sender, text) VALUES (?, ?, ?)",
-                       (session_id, "model", ai_text))
+        if not ai_text:
+            raise Exception(
+                "Gemini returned an empty report analysis."
+            )
+
+        # --------------------------------------
+        # Save AI analysis
+        # --------------------------------------
+
+        cursor.execute(
+            """
+            INSERT INTO messages
+            (session_id, sender, text)
+            VALUES (?, ?, ?)
+            """,
+            (
+                session_id,
+                "model",
+                ai_text
+            )
+        )
+
         conn.commit()
         conn.close()
 
-        # Clean up local temporary file buffer
-        if os.path.exists(file_location):
+        # --------------------------------------
+        # Delete temporary file
+        # --------------------------------------
+
+        if file_location and os.path.exists(
+            file_location
+        ):
             os.remove(file_location)
 
-        file_title = f"Doc: {file.filename[:20]}"
+        file_title = (
+            f"Doc: {file.filename[:20]}"
+        )
+
         return {
-            "response": ai_text, 
-            "filename": file.filename, 
+            "response": ai_text,
+            "filename": file.filename,
             "title": file_title
         }
 
     except HTTPException as http_ex:
         raise http_ex
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
+        print("GEMINI UPLOAD ERROR:", str(e))
+
+        if file_location and os.path.exists(
+            file_location
+        ):
+            os.remove(file_location)
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+
+# ==========================================
+# 11. ALL CHAT SESSIONS
+# ==========================================
 
 @app.get("/sessions")
 async def get_all_sessions():
+
     try:
+
         conn = sqlite3.connect("labxplore.db")
         cursor = conn.cursor()
-        cursor.execute("SELECT id, title FROM chat_sessions ORDER BY created_at DESC")
+
+        cursor.execute(
+            """
+            SELECT id, title
+            FROM chat_sessions
+            ORDER BY created_at DESC
+            """
+        )
+
         sessions = cursor.fetchall()
-        
+
         sessions_list = []
+
         for s in sessions:
-            cursor.execute("SELECT sender, text FROM messages WHERE session_id = ? ORDER BY created_at ASC", (s[0],))
-            messages = [{"sender": msg[0], "text": msg[1]} for msg in cursor.fetchall()]
-            sessions_list.append({"id": s[0], "title": s[1], "messages": messages})
-            
+
+            cursor.execute(
+                """
+                SELECT sender, text
+                FROM messages
+                WHERE session_id = ?
+                ORDER BY created_at ASC
+                """,
+                (s[0],)
+            )
+
+            messages = [
+                {
+                    "sender": msg[0],
+                    "text": msg[1]
+                }
+                for msg in cursor.fetchall()
+            ]
+
+            sessions_list.append(
+                {
+                    "id": s[0],
+                    "title": s[1],
+                    "messages": messages
+                }
+            )
+
         conn.close()
-        return {"sessions": sessions_list}
-    
+
+        return {
+            "sessions": sessions_list
+        }
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
