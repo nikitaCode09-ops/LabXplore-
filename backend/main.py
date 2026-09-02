@@ -91,12 +91,13 @@ app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://lab-xplore-scrkf573-nikitakumari28092006-7528s-projects.vercel.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # ==========================================
 # 4. REQUEST / RESPONSE MODELS
