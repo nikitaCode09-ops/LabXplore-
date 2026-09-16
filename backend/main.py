@@ -1,7 +1,6 @@
 import sqlite3
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, File, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import os
 from google import genai
@@ -84,20 +83,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-
-# ==========================================
-# CORS Middleware
-# ==========================================
-
-FRONTEND_URL = os.getenv("FRONTEND_URL")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[FRONTEND_URL],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 # ==========================================
 # 4. REQUEST / RESPONSE MODELS
 # ==========================================
